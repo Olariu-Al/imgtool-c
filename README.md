@@ -1,0 +1,2 @@
+# imgtool-c
+ A lightweight command-line utility written in C for parsing, editing, and applying filters to BMP images.

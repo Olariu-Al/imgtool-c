@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#define HEADER_SIZE 14
 
 #pragma pack(push,1)
 typedef struct {
@@ -24,13 +25,14 @@ typedef struct{ //headersize
 	uint32_t y_per_m;
 	uint32_t important_colors;
 }BITMAPINFOHEADER;
-#pragma pack(pop) 
 
-typedef struct{
-	int height;
-	int width;
-	int pixel;
-}INFORMATION;
+typedef struct {
+	unsigned char blue;
+	unsigned char green;
+	unsigned char red;
+}PIXEL;
+
+#pragma pack(pop) 
 
 typedef enum {
 	INFO,
@@ -43,12 +45,6 @@ typedef enum {
 	DEFAULT
 }COMANDA;
 
-typedef enum {
-	BITMAPINFOHEADER_CASE,
-	BITMAPV5HEADER_CASE,
-	BITMAPV3INFOHEADER_CASE,
-	DEFAULT_CASE
-}BITMAPTYPE;
 
 COMANDA get_command(char *argv){
 	if(strcmp(argv,"info") == 0)
@@ -69,16 +65,78 @@ COMANDA get_command(char *argv){
 		return DEFAULT;
 }
 
-BITMAPTYPE get_type(uint32_t header_size){
-	if(header_size == 40)
-		return BITMAPINFOHEADER_CASE;
-	else{
-		return DEFAULT_CASE;
+char get_type(HEADER header){
+	if(header.semnatura[0] != 'B' || header.semnatura[1] != 'M'){
+		return 0;
 	}
+	if(header.header_size <40){
+		return 0;
+	}
+	return 1;
 }
 
-void procesare(INFORMATION info){
-	printf("Information about image:\n Height:%d\n Width:%d\n Number of bytes per pixel:%d\n",info.height,info.width,info.pixel);
+void procesare(FILE *f){
+	BITMAPINFOHEADER info;
+	fread(&info,sizeof(BITMAPINFOHEADER),1,f);
+	printf("Information about image:\n Height:%d\n Width:%d\n Number of bytes per pixel:%d\n",info.height,info.width,info.bit_depth);
+}
+
+void grayscale(HEADER header,FILE *f,char *out){
+	BITMAPINFOHEADER info;
+	fread(&info,sizeof(BITMAPINFOHEADER),1,f);
+	FILE *f2;
+	PIXEL pixel;
+	unsigned char gray[3];
+	int padding=(4-(info.width*3)%4)%4;	
+	f2=fopen(out,"wb");
+	header.header_size=40;
+	fwrite(&header,sizeof(HEADER),1,f2);
+	fwrite(&info,sizeof(BITMAPINFOHEADER),1,f2);
+	fseek(f,header.offset,SEEK_SET);
+	fseek(f2,header.offset,SEEK_SET);
+	for(unsigned int i=0;i<info.height;i++){
+		for(unsigned int j=0;j<info.width;j++){
+			fread(&pixel,sizeof(pixel),1,f);
+			gray[0]=(0.299 * pixel.red)+(0.587 * pixel.green) + (0.114 * pixel.blue);
+			gray[1]=gray[0];
+			gray[2]=gray[1];
+			fwrite(&gray,sizeof(unsigned char),3,f2);
+		}
+		gray[0]=0;
+		for(int k=0;k<padding;k++){
+			fwrite(&gray,sizeof(unsigned char),1,f2);
+		}
+	}
+	fclose(f2);
+}
+
+void inverse(HEADER header,FILE *f,char *out){ //este efectiv functia pt grayscale dar se modifica formula
+	BITMAPINFOHEADER info;
+	fread(&info,sizeof(BITMAPINFOHEADER),1,f);
+	FILE *f2;
+	PIXEL pixel;
+	unsigned char inverse[3];
+	int padding=(4-(info.width*3)%4)%4;	
+	f2=fopen(out,"wb");
+	header.header_size=40;
+	fwrite(&header,sizeof(HEADER),1,f2);
+	fwrite(&info,sizeof(BITMAPINFOHEADER),1,f2);
+	fseek(f,header.offset,SEEK_SET);
+	fseek(f2,header.offset,SEEK_SET);
+	for(unsigned int i=0;i<info.height;i++){
+		for(unsigned int j=0;j<info.width;j++){
+			fread(&pixel,sizeof(pixel),1,f);
+			inverse[0]=255-pixel.blue;
+			inverse[1]=255-pixel.green;
+			inverse[2]=255-pixel.red;
+			fwrite(&inverse,sizeof(unsigned char),3,f2);
+		}
+		inverse[0]=0;
+		for(int k=0;k<padding;k++){
+			fwrite(&inverse,sizeof(unsigned char),1,f2);
+		}
+	}
+	fclose(f2);
 }
 
 int main(int argc,char **argv){
@@ -94,43 +152,37 @@ int main(int argc,char **argv){
 		exit(1);
 	}
 	fread(&header,sizeof(HEADER),1,f);
-	if(header.semnatura[0] != 'B' || header.semnatura[1] != 'M'){
-		printf("Invalid file format\n");
+	char type=get_type(header);
+	if(!type){
+		printf("Invalid format\n");
 		fclose(f);
 		exit(1);
 	}
-	BITMAPTYPE type=get_type(header.header_size);
-	INFORMATION info;
-	switch(type){
-		case BITMAPINFOHEADER_CASE:{
-			BITMAPINFOHEADER info_header;
-			fread(&info_header,sizeof(BITMAPINFOHEADER),1,f);
-			info.height=info_header.height;
-			info.width=info_header.width;
-			info.pixel=info_header.bit_depth;
-			break;
-		}
-		case BITMAPV5HEADER_CASE:{
-			//inca nu e facut
-		}
-		case BITMAPV3INFOHEADER_CASE:{
-			//inca nu e facut
-		}
-		case DEFAULT_CASE:{
-			printf("File format not supported\n");
-			fclose(f);
-			exit(1);
-		}
-	}
 	switch(comanda){
 		case INFO:{
-			procesare(info); 
+			procesare(f); 
+			break;
 		}
 		case GRAYSCALE:{
-			
+			if(argc != 4){
+				printf("Invalid amount of arguments\n");
+				fclose(f);
+				exit(1);
+			}
+			grayscale(header,f,argv[3]);
+			break;
+		}
+		case INVERSARE:{
+			if(argc != 4){
+				printf("Invalid amount of arguments\n");
+				fclose(f);
+				exit(1);
+			}
+			inverse(header,f,argv[3]);
+			break;
 		}
 		case DEFAULT:{
-			
+			printf("Invalid command, write -help for a list of the commands\n");
 		}
 	}
 	fclose(f);
